@@ -161,6 +161,19 @@ fn out_path(src: &Path, fmt: &str, outdir: Option<&Path>) -> PathBuf {
     }
 }
 
+/// Posición dentro de una playlist: «[download] Downloading item 3 of 4» -> (3, 4).
+/// Sin esto la barra se reiniciaba de 0 a 100 % con cada vídeo de la lista.
+fn playlist_item(line: &str) -> Option<(usize, usize)> {
+    let rest = line.strip_prefix("[download] Downloading item ")?;
+    let mut campos = rest.split_whitespace();
+    let n: usize = campos.next()?.parse().ok()?;
+    if campos.next()? != "of" {
+        return None;
+    }
+    let total: usize = campos.next()?.parse().ok()?;
+    (total > 0 && n >= 1 && n <= total).then_some((n, total))
+}
+
 /// Porcentaje de una línea de progreso de yt-dlp: "[download]  42.3% of 10MiB".
 fn pct(line: &str) -> Option<f64> {
     if !line.starts_with("[download]") {
@@ -300,13 +313,28 @@ fn run_one(app: &AppHandle, argv: &[String], index: usize, total: usize) -> Resu
     *state.child.lock().unwrap() = Some(child);
 
     // ffmpeg no informa de porcentaje: ahí la barra avanza por archivos.
+    let mut item: Option<(usize, usize)> = None;
     for line in rx {
+        if let Some(pos) = playlist_item(&line) {
+            item = Some(pos);
+        }
         match pct(&line) {
-            Some(p) => progress(
-                app,
-                ((index as f64 + p / 100.0) / total as f64).min(1.0),
-                format!("{}/{} · {}", index + 1, total, clip(&line, 90)),
-            ),
+            Some(p) => {
+                // Dentro de una playlist, el porcentaje es el del vídeo actual.
+                let avance = match item {
+                    Some((n, m)) => (n as f64 - 1.0 + p / 100.0) / m as f64,
+                    None => p / 100.0,
+                };
+                let dentro = match item {
+                    Some((n, m)) => format!("{n} de {m} · "),
+                    None => String::new(),
+                };
+                progress(
+                    app,
+                    ((index as f64 + avance) / total as f64).min(1.0),
+                    format!("{}/{} · {dentro}{}", index + 1, total, clip(&line, 80)),
+                );
+            }
             None => log(app, line),
         }
     }
@@ -321,7 +349,15 @@ fn run_one(app: &AppHandle, argv: &[String], index: usize, total: usize) -> Resu
     }
 }
 
-fn run_jobs(app: AppHandle, jobs: Vec<(String, Vec<String>)>) {
+/// Qué contar al terminar. Una descarga es un solo trabajo aunque baje una
+/// playlist entera, así que decir «1 completado» engañaría.
+#[derive(Clone, Copy)]
+enum Resumen {
+    Archivos,
+    Descarga,
+}
+
+fn run_jobs(app: AppHandle, jobs: Vec<(String, Vec<String>)>, resumen: Resumen) {
     std::thread::spawn(move || {
         app.state::<Jobs>().cancel.store(false, Ordering::SeqCst);
         set_busy(&app, true);
@@ -359,12 +395,12 @@ fn run_jobs(app: AppHandle, jobs: Vec<(String, Vec<String>)>) {
         }
 
         let cancelled = app.state::<Jobs>().cancel.load(Ordering::SeqCst);
-        let msg = if cancelled {
-            "Cancelado".to_string()
-        } else if fail > 0 {
-            format!("{ok} completado(s), {fail} con error")
-        } else {
-            format!("{ok} completado(s)")
+        let msg = match (cancelled, resumen, fail) {
+            (true, _, _) => "Cancelado".to_string(),
+            (_, Resumen::Archivos, 0) => format!("{ok} archivo(s) convertido(s)"),
+            (_, Resumen::Archivos, _) => format!("{ok} convertido(s), {fail} con error"),
+            (_, Resumen::Descarga, 0) => "Descarga terminada".to_string(),
+            (_, Resumen::Descarga, _) => "La descarga terminó con errores".to_string(),
         };
         progress(&app, if cancelled { 0.0 } else { 1.0 }, msg);
         set_busy(&app, false);
@@ -506,7 +542,7 @@ fn convert(
         );
         jobs.push((format!("{} → {}", file_name(&src), file_name(&dst)), argv));
     }
-    run_jobs(app, jobs);
+    run_jobs(app, jobs, Resumen::Archivos);
     Ok(())
 }
 
@@ -545,7 +581,11 @@ fn download(
     let argv = ytdlp_argv(
         &ytdlp, &ffmpeg, &url, &dir, audio, &format, &bitrate, &height,
     );
-    run_jobs(app, vec![(format!("Descargando {}", clip(&url, 70)), argv)]);
+    run_jobs(
+        app,
+        vec![(format!("Descargando {}", clip(&url, 70)), argv)],
+        Resumen::Descarga,
+    );
     Ok(())
 }
 
@@ -607,6 +647,21 @@ mod tests {
         assert_eq!(pct("[download] 100% of 1MiB"), Some(100.0));
         assert_eq!(pct("un 50% de cosas"), None);
         assert_eq!(pct("[download] Destination: x.mp4"), None);
+    }
+
+    #[test]
+    fn posicion_dentro_de_la_playlist() {
+        assert_eq!(
+            playlist_item("[download] Downloading item 3 of 4"),
+            Some((3, 4))
+        );
+        assert_eq!(
+            playlist_item("[download] Downloading item 1 of 1"),
+            Some((1, 1))
+        );
+        assert_eq!(playlist_item("[download]  42.3% of 10MiB"), None);
+        assert_eq!(playlist_item("[download] Downloading item 5 of 4"), None);
+        assert_eq!(playlist_item("otra cosa"), None);
     }
 
     #[test]
