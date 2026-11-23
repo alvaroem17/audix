@@ -822,6 +822,65 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// El caso de uso principal de la pestaña Convertir: soltar una carpeta con
+    /// subcarpetas y que salgan todos los audios. Usa ffmpeg de verdad.
+    #[test]
+    fn convierte_una_carpeta_entera_con_subcarpetas() {
+        let Some(ffmpeg) = which("ffmpeg") else {
+            eprintln!("sin ffmpeg en el PATH, test omitido");
+            return;
+        };
+        let raiz = std::env::temp_dir().join("audix-test-carpeta");
+        let _ = std::fs::remove_dir_all(&raiz);
+        std::fs::create_dir_all(raiz.join("boda/discursos")).unwrap();
+
+        let crear = |ruta: &Path| {
+            let ok = Command::new(&ffmpeg)
+                .args([
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=d=1:s=128x96",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=d=1",
+                ])
+                .arg(ruta)
+                .status()
+                .unwrap();
+            assert!(ok.success(), "no se pudo crear {}", ruta.display());
+        };
+        crear(&raiz.join("boda/ceremonia.mp4"));
+        crear(&raiz.join("boda/discursos/padrino.mkv"));
+        crear(&raiz.join("boda/discursos/madrina.webm"));
+        std::fs::write(raiz.join("boda/notas.txt"), "no es un vídeo").unwrap();
+
+        let encontrados = expand(&[raiz.join("boda").to_string_lossy().into_owned()]);
+        assert_eq!(
+            encontrados.len(),
+            3,
+            "debe bajar a las subcarpetas y saltarse el .txt"
+        );
+
+        let destino = raiz.join("salida");
+        std::fs::create_dir_all(&destino).unwrap();
+        for src in &encontrados {
+            let dst = out_path(src, "mp3", Some(&destino));
+            let argv = ffmpeg_argv(&ffmpeg, src, &dst, "libmp3lame", Some("128k"));
+            let st = Command::new(&argv[0]).args(&argv[1..]).status().unwrap();
+            assert!(st.success(), "falló al convertir {}", src.display());
+            assert!(dst.is_file() && dst.metadata().unwrap().len() > 1000);
+        }
+        let salidas = std::fs::read_dir(&destino).unwrap().count();
+        assert_eq!(salidas, 3, "un mp3 por vídeo, sin pisarse entre carpetas");
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
     fn which(bin: &str) -> Option<String> {
         let path = std::env::var_os("PATH")?;
         std::env::split_paths(&path)
