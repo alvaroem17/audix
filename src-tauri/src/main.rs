@@ -18,6 +18,15 @@ const VIDEO_EXT: &[&str] = &[
     "3gp", "ogv", "vob", "divx", "rmvb",
 ];
 
+/// Plantilla de nombres de yt-dlp. Los vídeos de una playlist van a una subcarpeta
+/// con el nombre de ésta y los sueltos a la raíz del destino.
+///
+/// El `|.` del final es imprescindible: con el valor por defecto vacío yt-dlp
+/// construía una ruta absoluta («/titulo.mp4») y se saltaba la carpeta elegida.
+/// Tampoco sirve `%(playlist_title&{}/|)s`, porque sanea la barra a «⧸» y deja
+/// el nombre de la playlist pegado al del vídeo en vez de crear la carpeta.
+const OUT_TEMPLATE: &str = "%(playlist_title|.)s/%(title)s [%(id)s].%(ext)s";
+
 /// Formato de salida -> (códec de ffmpeg, si admite bitrate).
 fn codec_of(fmt: &str) -> Option<(&'static str, bool)> {
     Some(match fmt {
@@ -158,6 +167,77 @@ fn hide_console(cmd: &mut Command) {
 
 #[cfg(not(windows))]
 fn hide_console(_cmd: &mut Command) {}
+
+// ------------------------------------------------- construcción de comandos
+
+/// Comando de ffmpeg para extraer el audio. `bitrate` sólo para formatos con pérdida.
+fn ffmpeg_argv(ffmpeg: &str, src: &Path, dst: &Path, codec: &str, bitrate: Option<&str>) -> Vec<String> {
+    let mut argv: Vec<String> = vec![
+        ffmpeg.into(),
+        "-hide_banner".into(),
+        "-nostdin".into(),
+        "-nostats".into(),
+        "-loglevel".into(),
+        "error".into(),
+        "-y".into(),
+        "-i".into(),
+        src.to_string_lossy().into_owned(),
+        "-vn".into(),
+        "-c:a".into(),
+        codec.into(),
+    ];
+    if let Some(b) = bitrate {
+        argv.push("-b:a".into());
+        argv.push(b.into());
+    }
+    argv.push(dst.to_string_lossy().into_owned());
+    argv
+}
+
+/// Comando de yt-dlp. Los vídeos que pertenecen a una playlist van a una
+/// subcarpeta con el nombre de ésta; los sueltos, directos al destino.
+#[allow(clippy::too_many_arguments)]
+fn ytdlp_argv(
+    ytdlp: &str,
+    ffmpeg: &str,
+    url: &str,
+    dir: &Path,
+    audio: bool,
+    format: &str,
+    bitrate: &str,
+    height: &str,
+) -> Vec<String> {
+    let mut argv: Vec<String> = vec![
+        ytdlp.into(),
+        "--newline".into(),
+        "--ignore-errors".into(),
+        "--embed-metadata".into(),
+        "--ffmpeg-location".into(),
+        ffmpeg.into(),
+        "-P".into(),
+        dir.to_string_lossy().into_owned(),
+        "-o".into(),
+        OUT_TEMPLATE.into(),
+    ];
+    if audio {
+        argv.extend([
+            "-x".into(),
+            "--audio-format".into(),
+            format.into(),
+            "--audio-quality".into(),
+            bitrate.into(),
+        ]);
+    } else {
+        let sel = if height == "mejor" {
+            "bv*+ba/b".to_string()
+        } else {
+            format!("bv*[height<={height}]+ba/b[height<={height}]")
+        };
+        argv.extend(["-f".into(), sel, "--merge-output-format".into(), "mp4".into()]);
+    }
+    argv.push(url.into());
+    argv
+}
 
 // --------------------------------------------------------- ejecución
 
@@ -349,25 +429,7 @@ fn convert(
     for f in &files {
         let src = PathBuf::from(f);
         let dst = out_path(&src, &format, out.as_deref());
-        let mut argv: Vec<String> = vec![
-            ffmpeg.clone(),
-            "-hide_banner".into(),
-            "-nostdin".into(),
-            "-nostats".into(),
-            "-loglevel".into(),
-            "error".into(),
-            "-y".into(),
-            "-i".into(),
-            src.to_string_lossy().into_owned(),
-            "-vn".into(),
-            "-c:a".into(),
-            codec.into(),
-        ];
-        if lossy {
-            argv.push("-b:a".into());
-            argv.push(bitrate.clone());
-        }
-        argv.push(dst.to_string_lossy().into_owned());
+        let argv = ffmpeg_argv(&ffmpeg, &src, &dst, codec, lossy.then_some(bitrate.as_str()));
         jobs.push((format!("{} → {}", file_name(&src), file_name(&dst)), argv));
     }
     run_jobs(app, jobs);
@@ -403,42 +465,10 @@ fn download(
     let dir = PathBuf::from(&outdir);
     std::fs::create_dir_all(&dir).map_err(|e| format!("no se pudo crear {outdir}: {e}"))?;
 
-    let mut argv: Vec<String> = vec![
-        ytdlp,
-        "--newline".into(),
-        "--ignore-errors".into(),
-        "--embed-metadata".into(),
-        "--ffmpeg-location".into(),
-        ffmpeg,
-        "-P".into(),
-        dir.to_string_lossy().into_owned(),
-        // los vídeos de una playlist van a su propia subcarpeta
-        "-o".into(),
-        "%(playlist_title&{}/|)s%(title)s [%(id)s].%(ext)s".into(),
-    ];
     if audio {
         codec_of(&format).ok_or("Formato desconocido")?;
-        argv.extend([
-            "-x".into(),
-            "--audio-format".into(),
-            format,
-            "--audio-quality".into(),
-            bitrate,
-        ]);
-    } else {
-        let sel = if height == "mejor" {
-            "bv*+ba/b".to_string()
-        } else {
-            format!("bv*[height<={height}]+ba/b[height<={height}]")
-        };
-        argv.extend([
-            "-f".into(),
-            sel,
-            "--merge-output-format".into(),
-            "mp4".into(),
-        ]);
     }
-    argv.push(url.clone());
+    let argv = ytdlp_argv(&ytdlp, &ffmpeg, &url, &dir, audio, &format, &bitrate, &height);
     run_jobs(app, vec![(format!("Descargando {}", clip(&url, 70)), argv)]);
     Ok(())
 }
@@ -508,6 +538,125 @@ mod tests {
         assert!(is_video(Path::new("a.mkv")));
         assert!(!is_video(Path::new("a.txt")));
         assert!(!is_video(Path::new("sin_extension")));
+    }
+
+    #[test]
+    fn comando_de_ffmpeg_segun_el_formato() {
+        let src = Path::new("/v/a.mkv");
+        let dst = Path::new("/v/a.mp3");
+        let con = ffmpeg_argv("ffmpeg", src, dst, "libmp3lame", Some("192k"));
+        assert_eq!(con.first().unwrap(), "ffmpeg");
+        assert_eq!(con.last().unwrap(), "/v/a.mp3");
+        assert!(con.windows(2).any(|w| w == ["-b:a", "192k"]));
+        assert!(con.windows(2).any(|w| w == ["-c:a", "libmp3lame"]));
+        assert!(con.contains(&"-vn".to_string()), "no debe copiar el vídeo");
+
+        let sin = ffmpeg_argv("ffmpeg", src, Path::new("/v/a.flac"), "flac", None);
+        assert!(!sin.contains(&"-b:a".to_string()), "flac no lleva bitrate");
+    }
+
+    #[test]
+    fn comando_de_ytdlp_audio_y_video() {
+        let dir = Path::new("/out");
+        let a = ytdlp_argv("yt-dlp", "ffmpeg", "https://x/y", dir, true, "mp3", "320k", "1080");
+        assert!(a.contains(&"-x".to_string()));
+        assert!(a.windows(2).any(|w| w == ["--audio-format", "mp3"]));
+        assert!(a.windows(2).any(|w| w == ["--audio-quality", "320k"]));
+        assert_eq!(a.last().unwrap(), "https://x/y");
+
+        let v = ytdlp_argv("yt-dlp", "ffmpeg", "https://x/y", dir, false, "mp3", "320k", "720");
+        assert!(!v.contains(&"-x".to_string()));
+        let sel = &v[v.iter().position(|x| x == "-f").unwrap() + 1];
+        assert!(sel.contains("height<=720"), "limita la resolución: {sel}");
+
+        let best = ytdlp_argv("yt-dlp", "ffmpeg", "https://x/y", dir, false, "mp3", "320k", "mejor");
+        assert_eq!(best[best.iter().position(|x| x == "-f").unwrap() + 1], "bv*+ba/b");
+    }
+
+    /// Prueba de verdad: genera un vídeo con ffmpeg y lo convierte a mp3 con el
+    /// comando que arma la app. Se salta si el sistema no tiene ffmpeg.
+    #[test]
+    fn conversion_real_con_ffmpeg() {
+        let Some(ffmpeg) = which("ffmpeg") else {
+            eprintln!("sin ffmpeg en el PATH, test omitido");
+            return;
+        };
+        let dir = std::env::temp_dir().join("audix-test-convert");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("muestra.mp4");
+        let ok = Command::new(&ffmpeg)
+            .args([
+                "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "testsrc=d=1:s=160x120",
+                "-f", "lavfi", "-i", "sine=d=1",
+            ])
+            .arg(&src)
+            .status()
+            .unwrap();
+        assert!(ok.success(), "no se pudo crear el vídeo de prueba");
+
+        let dst = out_path(&src, "mp3", None);
+        let argv = ffmpeg_argv(&ffmpeg, &src, &dst, "libmp3lame", Some("192k"));
+        let status = Command::new(&argv[0]).args(&argv[1..]).status().unwrap();
+        assert!(status.success(), "ffmpeg falló: {argv:?}");
+        assert!(dst.is_file(), "no se creó {}", dst.display());
+        assert!(std::fs::metadata(&dst).unwrap().len() > 1000, "mp3 vacío");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Comprueba contra el yt-dlp real (sin tocar la red, con un info.json falso)
+    /// que la plantilla mete las playlists en su carpeta y deja los vídeos sueltos
+    /// dentro del destino en lugar de en la raíz del disco.
+    #[test]
+    fn plantilla_de_ytdlp_respeta_el_destino() {
+        let Some(ytdlp) = which("yt-dlp") else {
+            eprintln!("sin yt-dlp en el PATH, test omitido");
+            return;
+        };
+        let dir = std::env::temp_dir().join("audix-test-tmpl");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = r#""id":"abc","title":"Tema","ext":"mp4","_type":"video","extractor":"t","extractor_key":"T","webpage_url":"https://x/1","url":"https://x/1.mp4""#;
+
+        let filename = |json: &str, name: &str| {
+            let f = dir.join(name);
+            std::fs::write(&f, json).unwrap();
+            let out = Command::new(&ytdlp)
+                .args(["--quiet", "--skip-download", "--load-info-json"])
+                .arg(&f)
+                .arg("-P")
+                .arg(&dir)
+                .args(["-o", OUT_TEMPLATE, "--print", "filename"])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+
+        let suelto = filename(&format!("{{{base}}}"), "solo.json");
+        let lista = filename(
+            &format!(r#"{{{base},"playlist_title":"Mi Lista"}}"#),
+            "lista.json",
+        );
+
+        assert!(
+            Path::new(&suelto).starts_with(&dir),
+            "un vídeo suelto debe quedarse en el destino, no en {suelto}"
+        );
+        assert_eq!(
+            Path::new(&lista).parent().unwrap().file_name().unwrap(),
+            "Mi Lista",
+            "una playlist debe ir a su propia carpeta: {lista}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn which(bin: &str) -> Option<String> {
+        let path = std::env::var_os("PATH")?;
+        std::env::split_paths(&path)
+            .map(|d| d.join(bin))
+            .find(|p| p.is_file())
+            .map(|p| p.to_string_lossy().into_owned())
     }
 
     #[test]
