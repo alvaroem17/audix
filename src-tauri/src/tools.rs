@@ -223,20 +223,18 @@ mod tests {
         let file = format!("ffmpeg{EXE}");
         std::fs::write(bin.join(&file), b"falso").unwrap();
 
-        // Aunque el sistema tenga ffmpeg en el PATH, gana el de la carpeta de la app.
-        assert!(
-            which(&file).is_some(),
-            "este equipo debería tener ffmpeg en el PATH"
-        );
+        // La copia de la app gana, haya o no un ffmpeg del sistema en el PATH.
+        // (Ojo: nada de dar por hecho que hay ffmpeg instalado; en los runners
+        // de Windows y macOS no lo hay y el test reventaba ahí.)
         assert_eq!(
             find_in(std::slice::from_ref(&bin), "ffmpeg"),
             Some(bin.join(&file))
         );
-        // Y si no está en ninguna de las carpetas propias, se cae al PATH.
+        // Sin copia propia se cae al PATH, que en una máquina limpia es None.
         assert_eq!(
             find_in(&[base.join("no-existe")], "ffmpeg"),
             which(&file),
-            "sin copia propia debe usar la del sistema"
+            "sin copia propia debe usar la del sistema, si lo hay"
         );
         assert!(find_in(std::slice::from_ref(&bin), "programa-que-no-existe-xyz").is_none());
         let _ = std::fs::remove_dir_all(&base);
