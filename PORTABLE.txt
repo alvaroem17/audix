@@ -1,0 +1,18 @@
+Audix (versión portable)
+========================
+
+No hay que instalar nada. ffmpeg y yt-dlp ya vienen dentro, en la carpeta bin/.
+
+Windows
+  Abre Audix.exe. La primera vez Windows puede avisar con SmartScreen porque la
+  app no está firmada: pulsa "Más información" y luego "Ejecutar de todas formas".
+  Mantén Audix.exe y la carpeta bin/ juntos en la misma carpeta.
+
+macOS
+  La app no está firmada, así que la primera vez macOS no la deja abrir con doble
+  clic: haz clic derecho sobre Audix.app y elige "Abrir", y confirma. A partir de
+  ahí se abre normal.
+
+Dónde van los archivos
+  Al convertir, el audio sale junto al vídeo original salvo que elijas otra carpeta.
+  Al descargar, por defecto en Descargas/Audix.

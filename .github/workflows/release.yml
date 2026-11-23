@@ -1,0 +1,113 @@
+name: Compilar y publicar
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x64
+            platform: windows
+            rust_targets: x86_64-pc-windows-msvc
+          - os: macos-latest
+            label: macos-universal
+            platform: macos
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            tauri_target: --target universal-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.label }}
+
+      - name: Instalar el CLI de Tauri
+        shell: bash
+        run: |
+          command -v cargo-tauri >/dev/null || cargo install tauri-cli --version "^2" --locked
+
+      - name: Tests del backend
+        working-directory: src-tauri
+        run: cargo test --release
+
+      - name: Descargar ffmpeg y yt-dlp
+        shell: bash
+        run: ./scripts/fetch-tools.sh ${{ matrix.platform }}
+
+      # Instalador: sin herramientas dentro. La app pregunta al primer arranque.
+      - name: Compilar instalador
+        shell: bash
+        run: |
+          cargo tauri build ${{ matrix.tauri_target }} \
+            --bundles ${{ matrix.platform == 'windows' && 'nsis' || 'dmg' }}
+
+      # Portable: mismas binarias ya compiladas, con ffmpeg y yt-dlp incluidos.
+      - name: Empaquetar portable (Windows)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          mkdir -p pack/Audix
+          cp src-tauri/target/release/audix.exe pack/Audix/Audix.exe
+          cp -r src-tauri/bin pack/Audix/bin
+          cp PORTABLE.txt pack/Audix/LEEME.txt
+          mkdir -p dist
+          (cd pack && 7z a -tzip ../dist/Audix-${{ github.ref_name }}-windows-x64-portable.zip Audix)
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe \
+             dist/Audix-${{ github.ref_name }}-windows-x64-instalador.exe
+
+      - name: Empaquetar portable (macOS)
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          cargo tauri build --target universal-apple-darwin --bundles app \
+            --config '{"bundle":{"resources":["bin/*"]}}'
+          APP=src-tauri/target/universal-apple-darwin/release/bundle/macos/Audix.app
+          test -x "$APP/Contents/Resources/bin/ffmpeg"
+          mkdir -p pack dist
+          cp -R "$APP" pack/
+          cp PORTABLE.txt pack/LEEME.txt
+          (cd pack && zip -qry ../dist/Audix-${{ github.ref_name }}-macos-universal-portable.zip .)
+          cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg \
+             dist/Audix-${{ github.ref_name }}-macos-universal-instalador.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: dist/*
+
+  release:
+    name: Publicar release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Crear la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -lh dist
+          gh release create "${{ github.ref_name }}" dist/* \
+            --title "Audix ${{ github.ref_name }}" \
+            --notes-file .github/RELEASE_NOTES.md
