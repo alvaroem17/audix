@@ -28,7 +28,13 @@ pub fn bin_dir(app: &AppHandle) -> PathBuf {
 /// Busca una herramienta por orden: descargada por la app, junto al ejecutable
 /// (versión portable), dentro del paquete .app de macOS, y por último el PATH.
 pub fn find(app: &AppHandle, name: &str) -> Option<PathBuf> {
-    let file = format!("{name}{EXE}");
+    find_in(&search_dirs(app), name)
+}
+
+/// Dónde se mira, en orden: lo que ha descargado la app, `bin/` junto al
+/// ejecutable (portable de Windows), el propio directorio del ejecutable y
+/// `Resources/bin` dentro del paquete .app de macOS.
+fn search_dirs(app: &AppHandle) -> Vec<PathBuf> {
     let mut dirs = vec![bin_dir(app)];
     if let Ok(exe) = std::env::current_exe() {
         if let Some(d) = exe.parent() {
@@ -37,6 +43,11 @@ pub fn find(app: &AppHandle, name: &str) -> Option<PathBuf> {
             dirs.push(d.join("../Resources/bin"));
         }
     }
+    dirs
+}
+
+fn find_in(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
+    let file = format!("{name}{EXE}");
     dirs.iter()
         .map(|d| d.join(&file))
         .find(|p| p.is_file())
@@ -154,3 +165,39 @@ fn set_executable(p: &Path) {
 
 #[cfg(not(unix))]
 fn set_executable(_p: &Path) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// La versión portable depende de que se encuentre `bin/` junto al ejecutable
+    /// (y `Resources/bin` dentro del .app de macOS). Si esto se rompe, la app se
+    /// instala bien pero no convierte nada.
+    #[test]
+    fn encuentra_la_herramienta_junto_al_ejecutable() {
+        let base = std::env::temp_dir().join("audix-test-find");
+        let _ = std::fs::remove_dir_all(&base);
+        let bin = base.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let file = format!("ffmpeg{EXE}");
+        std::fs::write(bin.join(&file), b"falso").unwrap();
+
+        let dirs = vec![base.join("no-existe"), bin.clone()];
+        assert_eq!(find_in(&dirs, "ffmpeg"), Some(bin.join(&file)));
+        // Gana el primero de la lista: lo descargado por la app manda sobre el PATH.
+        assert_eq!(find_in(&dirs, "ffmpeg").unwrap().parent().unwrap(), bin);
+        assert!(find_in(&dirs, "programa-que-no-existe-xyz").is_none());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn hay_descargas_para_este_sistema() {
+        let s = sources();
+        assert_eq!(s.len(), 2, "hacen falta ffmpeg y yt-dlp");
+        assert!(s
+            .iter()
+            .all(|(_, url)| url.starts_with("https://github.com/")));
+        assert!(s.iter().any(|(name, _)| name.starts_with("ffmpeg")));
+        assert!(s.iter().any(|(name, _)| name.starts_with("yt-dlp")));
+    }
+}
