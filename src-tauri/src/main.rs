@@ -64,9 +64,16 @@ pub struct Entry {
 }
 
 #[derive(Serialize, Clone)]
+struct Tool {
+    found: bool,
+    path: String,
+    version: String,
+}
+
+#[derive(Serialize, Clone)]
 struct ToolStatus {
-    ffmpeg: bool,
-    ytdlp: bool,
+    ffmpeg: Tool,
+    ytdlp: Tool,
     dir: String,
 }
 
@@ -169,13 +176,13 @@ fn clip(s: &str, n: usize) -> String {
 
 /// En Windows, los procesos hijos abrirían una consola negra en cada archivo.
 #[cfg(windows)]
-fn hide_console(cmd: &mut Command) {
+pub fn hide_console(cmd: &mut Command) {
     use std::os::windows::process::CommandExt;
     cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
 }
 
 #[cfg(not(windows))]
-fn hide_console(_cmd: &mut Command) {}
+pub fn hide_console(_cmd: &mut Command) {}
 
 // ------------------------------------------------- construcción de comandos
 
@@ -382,13 +389,50 @@ fn scan(paths: Vec<String>) -> Vec<Entry> {
         .collect()
 }
 
+fn tool_info(app: &AppHandle, name: &str) -> Tool {
+    match tools::find(app, name) {
+        Some(p) => Tool {
+            found: true,
+            version: tools::version(&p).unwrap_or_default(),
+            path: p.to_string_lossy().into_owned(),
+        },
+        None => Tool {
+            found: false,
+            path: String::new(),
+            version: String::new(),
+        },
+    }
+}
+
 #[tauri::command]
 fn tool_status(app: AppHandle) -> ToolStatus {
     ToolStatus {
-        ffmpeg: tools::find(&app, "ffmpeg").is_some(),
-        ytdlp: tools::find(&app, "yt-dlp").is_some(),
+        ffmpeg: tool_info(&app, "ffmpeg"),
+        ytdlp: tool_info(&app, "yt-dlp"),
         dir: tools::bin_dir(&app).to_string_lossy().into_owned(),
     }
+}
+
+/// Fuerza la descarga de la última versión de yt-dlp. Es la respuesta a los
+/// errores 403 de YouTube, que casi siempre significan «yt-dlp desactualizado».
+#[tauri::command]
+fn update_ytdlp(app: AppHandle) -> Result<(), String> {
+    if app.state::<Jobs>().busy.load(Ordering::SeqCst) {
+        return Err("Ya hay un trabajo en curso".into());
+    }
+    std::thread::spawn(move || {
+        set_busy(&app, true);
+        match tools::update_ytdlp(&app) {
+            Ok(()) => progress(&app, 1.0, "yt-dlp actualizado"),
+            Err(e) => {
+                log(&app, format!("✖ {e}"));
+                progress(&app, 0.0, "No se pudo actualizar yt-dlp");
+            }
+        }
+        let _ = app.emit("tools", tool_status(app.clone()));
+        set_busy(&app, false);
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -522,6 +566,7 @@ fn main() {
             scan,
             tool_status,
             install_tools,
+            update_ytdlp,
             default_out,
             convert,
             download,

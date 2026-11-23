@@ -42,9 +42,12 @@ La versión portable los lleva en `bin/`, al lado del ejecutable. La instalable 
 ellos y los descarga de sus repos oficiales a la carpeta de datos del usuario cuando
 pulsas *Descargar herramientas*. Si ya los tienes en el PATH, usa esos.
 
-Mantener yt-dlp al día importa: YouTube cambia a menudo y las versiones viejas dejan de
-funcionar. Basta con borrar `yt-dlp` de la carpeta de herramientas y volver a pulsar
-*Descargar herramientas*, o actualizar el que tengas en el sistema.
+Mantener yt-dlp al día importa de verdad: YouTube cambia su extracción cada pocas semanas
+y las versiones antiguas empiezan a devolver `HTTP Error 403: Forbidden`. Por eso la
+cabecera de la ventana enseña siempre la versión instalada con un botón **Actualizar** al
+lado, que baja la última a la carpeta de la app (tiene prioridad sobre la del sistema).
+Cuando una descarga falla por ese motivo, la app lo detecta y te lo dice en vez de dejar
+el error en crudo.
 
 ## Desarrollo
 

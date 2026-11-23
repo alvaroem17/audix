@@ -6,6 +6,7 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use tauri::{AppHandle, Manager};
 
@@ -88,6 +89,58 @@ fn sources() -> Vec<(&'static str, String)> {
         };
         vec![("ffmpeg", ff(arch)), ("yt-dlp", yt("yt-dlp_linux"))]
     }
+}
+
+/// Versión instalada de una herramienta, para poder enseñarla en la ventana.
+pub fn version(bin: &Path) -> Option<String> {
+    let stem = bin.file_stem()?.to_string_lossy().to_lowercase();
+    // ffmpeg rechaza «--version» (sale con error y sin stdout); quiere un guion.
+    let flag = if stem.starts_with("ffmpeg") || stem.starts_with("ffprobe") {
+        "-version"
+    } else {
+        "--version"
+    };
+    let mut cmd = Command::new(bin);
+    cmd.arg(flag);
+    crate::hide_console(&mut cmd);
+    let out = cmd.output().ok()?;
+    let first = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .next()?
+        .trim()
+        .to_string();
+    // yt-dlp imprime sólo el número; ffmpeg, «ffmpeg version 6.1.1 Copyright…».
+    Some(match first.strip_prefix("ffmpeg version ") {
+        Some(rest) => rest.split_whitespace().next().unwrap_or(rest).to_string(),
+        None => first,
+    })
+}
+
+/// Baja la última versión de yt-dlp aunque ya hubiera una, y a la carpeta propia
+/// de la app, que tiene prioridad sobre el PATH.
+///
+/// No es un capricho: YouTube cambia su extracción cada pocas semanas y las
+/// versiones viejas empiezan a dar «HTTP Error 403: Forbidden». Si el sistema
+/// trae un yt-dlp antiguo, la app tiene que poder pasar por encima.
+pub fn update_ytdlp(app: &AppHandle) -> Result<(), String> {
+    let dir = bin_dir(app);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("no se pudo crear {}: {e}", dir.display()))?;
+    let (file, url) = sources()
+        .into_iter()
+        .find(|(name, _)| name.starts_with("yt-dlp"))
+        .ok_or("no hay descarga de yt-dlp para este sistema")?;
+    log(
+        app,
+        format!("Descargando la última versión de yt-dlp de {url}"),
+    );
+    fetch(app, &url, &dir.join(file), "yt-dlp")?;
+    let nueva = version(&dir.join(file)).unwrap_or_else(|| "?".into());
+    log(
+        app,
+        format!("✔ yt-dlp {nueva} instalado en {}", dir.display()),
+    );
+    Ok(())
 }
 
 /// Descarga las herramientas que falten. Se llama desde un hilo aparte.
@@ -188,6 +241,27 @@ mod tests {
         assert_eq!(find_in(&dirs, "ffmpeg").unwrap().parent().unwrap(), bin);
         assert!(find_in(&dirs, "programa-que-no-existe-xyz").is_none());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// La versión se enseña en la ventana y es el dato con el que se diagnostica
+    /// un 403 de YouTube, así que tiene que salir limpia, sin el «ffmpeg version».
+    #[test]
+    fn lee_la_version_de_las_herramientas() {
+        for name in ["ffmpeg", "yt-dlp"] {
+            let Some(bin) = which(&format!("{name}{EXE}")) else {
+                eprintln!("sin {name} en el PATH, se omite");
+                continue;
+            };
+            let v = version(&bin).unwrap_or_default();
+            assert!(!v.is_empty(), "{name} no devolvió versión");
+            assert!(!v.contains(' '), "{name}: versión con ruido: {v:?}");
+            // Valen «2026.10.26», «n9.0.1» o «7.0.2-static»: lo que no vale es
+            // que se cuele la frase entera de ffmpeg.
+            assert!(
+                v.len() < 32 && v.chars().any(|c| c.is_ascii_digit()),
+                "{name}: versión con pinta rara: {v:?}"
+            );
+        }
     }
 
     #[test]

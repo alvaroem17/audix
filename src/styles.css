@@ -287,4 +287,16 @@ pre {
   user-select: text;
 }
 
+.hint-box {
+  margin: 10px 0 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--fg);
+  font-size: 12.5px;
+}
+
+.badge button.link { margin-left: 2px; }
+
 .hidden { display: none !important; }

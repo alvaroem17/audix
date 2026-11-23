@@ -12,6 +12,11 @@ const LOSSLESS = ["flac", "wav"];
 
 const $ = (id) => document.getElementById(id);
 
+const showLog = (visible) => {
+  $("log").classList.toggle("hidden", !visible);
+  $("toggleLog").textContent = visible ? "Ocultar detalle" : "Ver detalle";
+};
+
 // Las rutas largas no caben. Se enseñan las dos últimas carpetas y la completa
 // queda en el tooltip. Vale para separadores de Windows y de macOS.
 const shortPath = (p) => {
@@ -63,22 +68,55 @@ async function refreshTools() {
 }
 
 function showTools(t) {
-  const missing = [!t.ffmpeg && "ffmpeg", !t.ytdlp && "yt-dlp"].filter(Boolean);
   const box = $("tools");
-  box.classList.toggle("hidden", missing.length === 0);
-  if (!missing.length) return;
-  box.innerHTML = `Falta ${missing.join(" y ")} <button id="getTools" class="link">Descargar herramientas</button>`;
-  $("getTools").onclick = async () => {
+  box.classList.remove("hidden");
+  const missing = [!t.ffmpeg.found && "ffmpeg", !t.ytdlp.found && "yt-dlp"].filter(Boolean);
+
+  if (missing.length) {
+    box.textContent = `Falta ${missing.join(" y ")} `;
+    addAction(box, "Descargar herramientas", "install_tools");
+    return;
+  }
+  // La versión de yt-dlp siempre a la vista: es el dato que explica casi todos
+  // los fallos de descarga, y el botón de actualizar tiene que estar a mano.
+  box.textContent = `yt-dlp ${t.ytdlp.version || "?"} `;
+  box.title = `${t.ytdlp.path}\nffmpeg ${t.ffmpeg.version} — ${t.ffmpeg.path}`;
+  addAction(box, "Actualizar", "update_ytdlp");
+}
+
+function addAction(box, label, cmd) {
+  const b = document.createElement("button");
+  b.className = "link";
+  b.textContent = label;
+  b.onclick = async () => {
     try {
-      await invoke("install_tools");
-      $("log").classList.remove("hidden");
+      await invoke(cmd);
+      showLog(true);
     } catch (e) {
       alert(e);
     }
   };
+  box.appendChild(b);
 }
 
 listen("tools", (e) => showTools(e.payload));
+
+// YouTube deja de servir a las versiones viejas de yt-dlp y el error que devuelve
+// («403 Forbidden») no dice nada por sí solo. Se traduce a algo accionable.
+const PISTAS = [
+  [/403|Forbidden|unable to download video data|nsig extraction failed|Sign in to confirm/i,
+   "Parece que yt-dlp está desactualizado: YouTube bloquea las versiones antiguas. Pulsa «Actualizar» arriba y vuelve a intentarlo."],
+  [/is not a valid URL|Unsupported URL/i,
+   "Ese enlace no lo reconoce yt-dlp. Comprueba que sea la dirección completa del vídeo o de la playlist."],
+  [/Private video|members-only|This video is unavailable/i,
+   "El vídeo es privado, de pago o ya no existe."],
+  [/No space left/i, "No queda espacio en el disco de destino."],
+];
+
+function pista(texto) {
+  for (const [re, msg] of PISTAS) if (re.test(texto)) return msg;
+  return "";
+}
 
 // ------------------------------------------------------------ lista de archivos
 
@@ -211,10 +249,7 @@ $("go").onclick = async () => {
 
 $("openOut").onclick = () => revealItemInDir(lastOut).catch((e) => alert(e));
 
-$("toggleLog").onclick = () => {
-  const hidden = $("log").classList.toggle("hidden");
-  $("toggleLog").textContent = hidden ? "Ver detalle" : "Ocultar detalle";
-};
+$("toggleLog").onclick = () => showLog($("log").classList.contains("hidden"));
 
 // -------------------------------------------------------------------- eventos
 
@@ -232,8 +267,14 @@ listen("progress", ({ payload }) => {
 listen("busy", ({ payload }) => {
   busy = payload;
   render();
-  if (!busy) {
-    refreshTools();
-    $("openOut").classList.toggle("hidden", !lastOut);
+  if (busy) {
+    $("hint").classList.add("hidden");
+    return;
   }
+  refreshTools();
+  $("openOut").classList.toggle("hidden", !lastOut);
+  const msg = $("status").textContent.includes("error") ? pista($("log").textContent) : "";
+  $("hint").textContent = msg;
+  $("hint").classList.toggle("hidden", !msg);
+  if (msg) showLog(true);
 });
