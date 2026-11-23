@@ -55,19 +55,26 @@ fn sources() -> Vec<(&'static str, String)> {
     let ff = |arch: &str| {
         format!("https://github.com/eugeneware/ffmpeg-static/releases/download/{FFMPEG_TAG}/ffmpeg-{arch}")
     };
-    let yt = |name: &str| {
-        format!("https://github.com/yt-dlp/yt-dlp/releases/latest/download/{name}")
-    };
+    let yt =
+        |name: &str| format!("https://github.com/yt-dlp/yt-dlp/releases/latest/download/{name}");
     if cfg!(windows) {
         vec![
             ("ffmpeg.exe", ff("win32-x64")),
             ("yt-dlp.exe", yt("yt-dlp.exe")),
         ]
     } else if cfg!(target_os = "macos") {
-        let arch = if cfg!(target_arch = "aarch64") { "darwin-arm64" } else { "darwin-x64" };
+        let arch = if cfg!(target_arch = "aarch64") {
+            "darwin-arm64"
+        } else {
+            "darwin-x64"
+        };
         vec![("ffmpeg", ff(arch)), ("yt-dlp", yt("yt-dlp_macos"))]
     } else {
-        let arch = if cfg!(target_arch = "aarch64") { "linux-arm64" } else { "linux-x64" };
+        let arch = if cfg!(target_arch = "aarch64") {
+            "linux-arm64"
+        } else {
+            "linux-x64"
+        };
         vec![("ffmpeg", ff(arch)), ("yt-dlp", yt("yt-dlp_linux"))]
     }
 }
@@ -75,7 +82,8 @@ fn sources() -> Vec<(&'static str, String)> {
 /// Descarga las herramientas que falten. Se llama desde un hilo aparte.
 pub fn install(app: &AppHandle) -> Result<(), String> {
     let dir = bin_dir(app);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("no se pudo crear {}: {e}", dir.display()))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("no se pudo crear {}: {e}", dir.display()))?;
     for (file, url) in sources() {
         let name = file.trim_end_matches(".exe");
         if find(app, name).is_some() {
@@ -118,7 +126,11 @@ fn fetch(app: &AppHandle, url: &str, dst: &Path, name: &str) -> Result<(), Strin
         done += n as u64;
         if done >= next_report {
             next_report = done + (1 << 21); // informa cada 2 MB
-            let frac = if total > 0 { done as f64 / total as f64 } else { 0.0 };
+            let frac = if total > 0 {
+                done as f64 / total as f64
+            } else {
+                0.0
+            };
             let mb = |b: u64| b as f64 / 1_048_576.0;
             let txt = if total > 0 {
                 format!("{name}: {:.0} de {:.0} MB", mb(done), mb(total))

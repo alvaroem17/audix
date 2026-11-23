@@ -24,7 +24,6 @@ jobs:
             label: macos-universal
             platform: macos
             rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
-            tauri_target: --target universal-apple-darwin
 
     steps:
       - uses: actions/checkout@v4
@@ -38,10 +37,14 @@ jobs:
           workspaces: src-tauri
           key: ${{ matrix.label }}
 
+      # El CLI oficial de npm viene ya compilado; con cargo install tardaría minutos.
       - name: Instalar el CLI de Tauri
+        run: npm install -g @tauri-apps/cli@^2
+
+      - name: Poner la versión de la etiqueta en la app
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
-        run: |
-          command -v cargo-tauri >/dev/null || cargo install tauri-cli --version "^2" --locked
+        run: python3 scripts/set-version.py "${{ github.ref_name }}"
 
       - name: Tests del backend
         working-directory: src-tauri
@@ -51,41 +54,44 @@ jobs:
         shell: bash
         run: ./scripts/fetch-tools.sh ${{ matrix.platform }}
 
-      # Instalador: sin herramientas dentro. La app pregunta al primer arranque.
-      - name: Compilar instalador
-        shell: bash
-        run: |
-          cargo tauri build ${{ matrix.tauri_target }} \
-            --bundles ${{ matrix.platform == 'windows' && 'nsis' || 'dmg' }}
+      # Instalador: sin herramientas dentro, las ofrece al primer arranque.
+      - name: Compilar instalador (Windows)
+        if: matrix.platform == 'windows'
+        run: tauri build --bundles nsis
 
-      # Portable: mismas binarias ya compiladas, con ffmpeg y yt-dlp incluidos.
+      - name: Compilar instalador (macOS)
+        if: matrix.platform == 'macos'
+        run: tauri build --target universal-apple-darwin --bundles dmg
+
+      # Portable: reaprovecha lo ya compilado y mete ffmpeg y yt-dlp al lado.
       - name: Empaquetar portable (Windows)
         if: matrix.platform == 'windows'
         shell: bash
         run: |
-          mkdir -p pack/Audix
+          mkdir -p pack/Audix dist
           cp src-tauri/target/release/audix.exe pack/Audix/Audix.exe
           cp -r src-tauri/bin pack/Audix/bin
           cp PORTABLE.txt pack/Audix/LEEME.txt
-          mkdir -p dist
-          (cd pack && 7z a -tzip ../dist/Audix-${{ github.ref_name }}-windows-x64-portable.zip Audix)
+          (cd pack && 7z a -tzip "../dist/Audix-${{ github.ref_name }}-windows-x64-portable.zip" Audix)
           cp src-tauri/target/release/bundle/nsis/*-setup.exe \
-             dist/Audix-${{ github.ref_name }}-windows-x64-instalador.exe
+             "dist/Audix-${{ github.ref_name }}-windows-x64-instalador.exe"
 
       - name: Empaquetar portable (macOS)
         if: matrix.platform == 'macos'
         shell: bash
         run: |
-          cargo tauri build --target universal-apple-darwin --bundles app \
+          tauri build --target universal-apple-darwin --bundles app \
             --config '{"bundle":{"resources":["bin/*"]}}'
           APP=src-tauri/target/universal-apple-darwin/release/bundle/macos/Audix.app
+          # Sin esto el portable saldría sin ffmpeg y fallaría al convertir.
           test -x "$APP/Contents/Resources/bin/ffmpeg"
+          test -x "$APP/Contents/Resources/bin/yt-dlp"
           mkdir -p pack dist
           cp -R "$APP" pack/
           cp PORTABLE.txt pack/LEEME.txt
-          (cd pack && zip -qry ../dist/Audix-${{ github.ref_name }}-macos-universal-portable.zip .)
+          (cd pack && zip -qry "../dist/Audix-${{ github.ref_name }}-macos-universal-portable.zip" .)
           cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg \
-             dist/Audix-${{ github.ref_name }}-macos-universal-instalador.dmg
+             "dist/Audix-${{ github.ref_name }}-macos-universal-instalador.dmg"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -98,7 +104,6 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -106,8 +111,10 @@ jobs:
       - name: Crear la release
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           ls -lh dist
           gh release create "${{ github.ref_name }}" dist/* \
+            --repo "$REPO" \
             --title "Audix ${{ github.ref_name }}" \
-            --notes-file .github/RELEASE_NOTES.md
+            --generate-notes

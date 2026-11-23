@@ -99,7 +99,9 @@ fn is_video(p: &Path) -> bool {
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     let mut entries: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
     entries.sort();
     for p in entries {
@@ -127,13 +129,20 @@ fn expand(paths: &[String]) -> Vec<PathBuf> {
 }
 
 fn file_name(p: &Path) -> String {
-    p.file_name().unwrap_or_default().to_string_lossy().into_owned()
+    p.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Ruta del audio resultante. Si coincide con el origen (convertir un mp3 a mp3
 /// en su propia carpeta) se le añade un sufijo para no machacarlo.
 fn out_path(src: &Path, fmt: &str, outdir: Option<&Path>) -> PathBuf {
-    let stem = src.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+    let stem = src
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
     let dir = outdir
         .map(Path::to_path_buf)
         .unwrap_or_else(|| src.parent().unwrap_or(Path::new(".")).to_path_buf());
@@ -171,7 +180,13 @@ fn hide_console(_cmd: &mut Command) {}
 // ------------------------------------------------- construcción de comandos
 
 /// Comando de ffmpeg para extraer el audio. `bitrate` sólo para formatos con pérdida.
-fn ffmpeg_argv(ffmpeg: &str, src: &Path, dst: &Path, codec: &str, bitrate: Option<&str>) -> Vec<String> {
+fn ffmpeg_argv(
+    ffmpeg: &str,
+    src: &Path,
+    dst: &Path,
+    codec: &str,
+    bitrate: Option<&str>,
+) -> Vec<String> {
     let mut argv: Vec<String> = vec![
         ffmpeg.into(),
         "-hide_banner".into(),
@@ -233,7 +248,12 @@ fn ytdlp_argv(
         } else {
             format!("bv*[height<={height}]+ba/b[height<={height}]")
         };
-        argv.extend(["-f".into(), sel, "--merge-output-format".into(), "mp4".into()]);
+        argv.extend([
+            "-f".into(),
+            sel,
+            "--merge-output-format".into(),
+            "mp4".into(),
+        ]);
     }
     argv.push(url.into());
     argv
@@ -352,7 +372,11 @@ fn scan(paths: Vec<String>) -> Vec<Entry> {
         .into_iter()
         .map(|p| Entry {
             name: file_name(&p),
-            dir: p.parent().unwrap_or(Path::new("")).to_string_lossy().into_owned(),
+            dir: p
+                .parent()
+                .unwrap_or(Path::new(""))
+                .to_string_lossy()
+                .into_owned(),
             path: p.to_string_lossy().into_owned(),
         })
         .collect()
@@ -429,7 +453,13 @@ fn convert(
     for f in &files {
         let src = PathBuf::from(f);
         let dst = out_path(&src, &format, out.as_deref());
-        let argv = ffmpeg_argv(&ffmpeg, &src, &dst, codec, lossy.then_some(bitrate.as_str()));
+        let argv = ffmpeg_argv(
+            &ffmpeg,
+            &src,
+            &dst,
+            codec,
+            lossy.then_some(bitrate.as_str()),
+        );
         jobs.push((format!("{} → {}", file_name(&src), file_name(&dst)), argv));
     }
     run_jobs(app, jobs);
@@ -468,7 +498,9 @@ fn download(
     if audio {
         codec_of(&format).ok_or("Formato desconocido")?;
     }
-    let argv = ytdlp_argv(&ytdlp, &ffmpeg, &url, &dir, audio, &format, &bitrate, &height);
+    let argv = ytdlp_argv(
+        &ytdlp, &ffmpeg, &url, &dir, audio, &format, &bitrate, &height,
+    );
     run_jobs(app, vec![(format!("Descargando {}", clip(&url, 70)), argv)]);
     Ok(())
 }
@@ -558,19 +590,49 @@ mod tests {
     #[test]
     fn comando_de_ytdlp_audio_y_video() {
         let dir = Path::new("/out");
-        let a = ytdlp_argv("yt-dlp", "ffmpeg", "https://x/y", dir, true, "mp3", "320k", "1080");
+        let a = ytdlp_argv(
+            "yt-dlp",
+            "ffmpeg",
+            "https://x/y",
+            dir,
+            true,
+            "mp3",
+            "320k",
+            "1080",
+        );
         assert!(a.contains(&"-x".to_string()));
         assert!(a.windows(2).any(|w| w == ["--audio-format", "mp3"]));
         assert!(a.windows(2).any(|w| w == ["--audio-quality", "320k"]));
         assert_eq!(a.last().unwrap(), "https://x/y");
 
-        let v = ytdlp_argv("yt-dlp", "ffmpeg", "https://x/y", dir, false, "mp3", "320k", "720");
+        let v = ytdlp_argv(
+            "yt-dlp",
+            "ffmpeg",
+            "https://x/y",
+            dir,
+            false,
+            "mp3",
+            "320k",
+            "720",
+        );
         assert!(!v.contains(&"-x".to_string()));
         let sel = &v[v.iter().position(|x| x == "-f").unwrap() + 1];
         assert!(sel.contains("height<=720"), "limita la resolución: {sel}");
 
-        let best = ytdlp_argv("yt-dlp", "ffmpeg", "https://x/y", dir, false, "mp3", "320k", "mejor");
-        assert_eq!(best[best.iter().position(|x| x == "-f").unwrap() + 1], "bv*+ba/b");
+        let best = ytdlp_argv(
+            "yt-dlp",
+            "ffmpeg",
+            "https://x/y",
+            dir,
+            false,
+            "mp3",
+            "320k",
+            "mejor",
+        );
+        assert_eq!(
+            best[best.iter().position(|x| x == "-f").unwrap() + 1],
+            "bv*+ba/b"
+        );
     }
 
     /// Prueba de verdad: genera un vídeo con ffmpeg y lo convierte a mp3 con el
@@ -587,9 +649,18 @@ mod tests {
         let src = dir.join("muestra.mp4");
         let ok = Command::new(&ffmpeg)
             .args([
-                "-hide_banner", "-loglevel", "error", "-y",
-                "-f", "lavfi", "-i", "testsrc=d=1:s=160x120",
-                "-f", "lavfi", "-i", "sine=d=1",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=d=1:s=160x120",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=d=1",
             ])
             .arg(&src)
             .status()
@@ -668,7 +739,11 @@ mod tests {
         std::fs::write(dir.join("sub/b.mkv"), b"x").unwrap();
         std::fs::write(dir.join("c.txt"), b"x").unwrap();
         let p = dir.to_string_lossy().into_owned();
-        let found = expand(&[p.clone(), p, dir.join("a.mp4").to_string_lossy().into_owned()]);
+        let found = expand(&[
+            p.clone(),
+            p,
+            dir.join("a.mp4").to_string_lossy().into_owned(),
+        ]);
         assert_eq!(found.len(), 2, "recursivo, sin el .txt y sin duplicados");
         let _ = std::fs::remove_dir_all(&dir);
     }

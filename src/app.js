@@ -2,6 +2,7 @@ const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open } = window.__TAURI__.dialog;
 const { getCurrentWebview } = window.__TAURI__.webview;
+const { revealItemInDir } = window.__TAURI__.opener;
 
 const FORMATS = ["mp3", "m4a", "opus", "ogg", "flac", "wav"];
 const BITRATES = ["128k", "192k", "256k", "320k"];
@@ -10,6 +11,13 @@ const HEIGHTS = ["mejor", "2160", "1440", "1080", "720", "480"];
 const LOSSLESS = ["flac", "wav"];
 
 const $ = (id) => document.getElementById(id);
+
+// Las rutas largas no caben. Se enseñan las dos últimas carpetas y la completa
+// queda en el tooltip. Vale para separadores de Windows y de macOS.
+const shortPath = (p) => {
+  const parts = p.split(/[\\/]/).filter(Boolean);
+  return parts.length > 2 ? "…/" + parts.slice(-2).join("/") : p;
+};
 const fill = (el, items, i = 0) => {
   el.innerHTML = items.map((x) => `<option>${x}</option>`).join("");
   el.selectedIndex = i;
@@ -19,6 +27,8 @@ let files = [];
 let convertOut = "";
 let downloadOut = "";
 let busy = false;
+let lastOut = "";
+let tab = "convert";
 
 // ---------------------------------------------------------------- arranque
 
@@ -38,9 +48,11 @@ refreshTools();
 
 document.querySelectorAll(".tabs button").forEach((b) => {
   b.onclick = () => {
+    tab = b.dataset.tab;
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
-    $("tab-convert").classList.toggle("hidden", b.dataset.tab !== "convert");
-    $("tab-download").classList.toggle("hidden", b.dataset.tab !== "download");
+    $("tab-convert").classList.toggle("hidden", tab !== "convert");
+    $("tab-download").classList.toggle("hidden", tab !== "download");
+    render();
   };
 });
 
@@ -80,8 +92,12 @@ function render() {
     .join("");
   // El nombre va por textContent: un archivo puede llamarse "<script>".
   $("list").querySelectorAll("li").forEach((li, i) => {
-    li.querySelector(".nm").textContent = files[i].name;
-    li.querySelector(".dr").textContent = files[i].dir;
+    const nm = li.querySelector(".nm");
+    const dr = li.querySelector(".dr");
+    nm.textContent = files[i].name;
+    nm.title = files[i].path;
+    dr.textContent = shortPath(files[i].dir);
+    dr.title = files[i].dir;
   });
   $("list").querySelectorAll(".icon").forEach((b) => {
     b.onclick = () => {
@@ -90,13 +106,20 @@ function render() {
     };
   });
 
-  $("cOut").textContent = convertOut || "Junto al archivo original";
+  $("cOut").textContent = convertOut ? shortPath(convertOut) : "Junto al archivo original";
+  $("cOut").title = convertOut || "El audio se guarda en la misma carpeta que el vídeo";
   $("cOutClear").classList.toggle("hidden", !convertOut);
-  $("dOut").textContent = downloadOut;
-  $("cGo").textContent = busy ? "Cancelar" : files.length ? `Convertir ${files.length} archivo(s)` : "Convertir";
-  $("dGo").textContent = busy ? "Cancelar" : "Descargar";
-  $("cGo").classList.toggle("cancel", busy);
-  $("dGo").classList.toggle("cancel", busy);
+  $("dOut").textContent = shortPath(downloadOut);
+  $("dOut").title = downloadOut;
+  const convirtiendo = tab === "convert";
+  $("go").textContent = busy
+    ? "Cancelar"
+    : convirtiendo
+      ? files.length
+        ? `Convertir ${files.length} archivo(s)`
+        : "Convertir"
+      : "Descargar";
+  $("go").classList.toggle("cancel", busy);
 
   const lossless = LOSSLESS.includes($("cFormat").value);
   $("cBitrate").disabled = lossless;
@@ -159,35 +182,34 @@ getCurrentWebview().onDragDropEvent(({ payload }) => {
 
 // ------------------------------------------------------------------ acciones
 
-$("cGo").onclick = async () => {
+$("go").onclick = async () => {
   if (busy) return invoke("cancel");
   try {
-    await invoke("convert", {
-      files: files.map((f) => f.path),
-      format: $("cFormat").value,
-      bitrate: $("cBitrate").value,
-      outdir: convertOut,
-    });
+    if (tab === "convert") {
+      await invoke("convert", {
+        files: files.map((f) => f.path),
+        format: $("cFormat").value,
+        bitrate: $("cBitrate").value,
+        outdir: convertOut,
+      });
+      lastOut = convertOut || files[0]?.dir || "";
+    } else {
+      await invoke("download", {
+        url: $("url").value,
+        audio: $("dKind").value === "audio",
+        format: $("dFormat").value,
+        bitrate: $("dBitrate").value,
+        height: $("dHeight").value,
+        outdir: downloadOut,
+      });
+      lastOut = downloadOut;
+    }
   } catch (e) {
     alert(e);
   }
 };
 
-$("dGo").onclick = async () => {
-  if (busy) return invoke("cancel");
-  try {
-    await invoke("download", {
-      url: $("url").value,
-      audio: $("dKind").value === "audio",
-      format: $("dFormat").value,
-      bitrate: $("dBitrate").value,
-      height: $("dHeight").value,
-      outdir: downloadOut,
-    });
-  } catch (e) {
-    alert(e);
-  }
-};
+$("openOut").onclick = () => revealItemInDir(lastOut).catch((e) => alert(e));
 
 $("toggleLog").onclick = () => {
   const hidden = $("log").classList.toggle("hidden");
@@ -210,5 +232,8 @@ listen("progress", ({ payload }) => {
 listen("busy", ({ payload }) => {
   busy = payload;
   render();
-  if (!busy) refreshTools();
+  if (!busy) {
+    refreshTools();
+    $("openOut").classList.toggle("hidden", !lastOut);
+  }
 });

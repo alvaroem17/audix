@@ -175,7 +175,7 @@ input[type="text"]:focus, select:focus { outline: 2px solid var(--accent); outli
 
 .list li:last-child { border-bottom: 0; }
 .list .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.list .dr { color: var(--muted); font-size: 11px; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
+.list .dr { color: var(--muted); font-size: 11px; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .icon {
   border: 0;
@@ -214,18 +214,18 @@ input[type="text"]:focus, select:focus { outline: 2px solid var(--accent); outli
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
   font-size: 13px;
 }
 
 .go {
+  width: 100%;
   padding: 11px;
   border-radius: 10px;
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-fg);
   font-weight: 650;
-  margin-top: auto;
+  margin-bottom: 12px;
 }
 
 .go:hover:not(:disabled) { filter: brightness(1.07); }
