@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Audix</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header>
+  <h1>Audix</h1>
+  <div id="tools" class="badge hidden"></div>
+</header>
+
+<nav class="tabs">
+  <button data-tab="convert" class="active">Convertir</button>
+  <button data-tab="download">Descargar</button>
+</nav>
+
+<main>
+  <section id="tab-convert">
+    <div id="drop" class="drop">
+      <p class="drop-title">Arrastra vídeos o carpetas aquí</p>
+      <div class="drop-actions">
+        <button id="addFiles">Elegir archivos…</button>
+        <button id="addFolder">Elegir carpeta…</button>
+      </div>
+      <p class="hint">De una carpeta se cogen todos los vídeos, también los de sus subcarpetas.</p>
+    </div>
+
+    <ul id="list" class="list"></ul>
+
+    <div class="fields">
+      <label>Formato <select id="cFormat"></select></label>
+      <label>Calidad <select id="cBitrate"></select></label>
+      <label class="grow">Destino
+        <span class="path">
+          <button id="cOut" class="pathbtn">Junto al archivo original</button>
+          <button id="cOutClear" class="icon" title="Volver a junto al original">✕</button>
+        </span>
+      </label>
+    </div>
+
+    <button id="cGo" class="go">Convertir</button>
+  </section>
+
+  <section id="tab-download" class="hidden">
+    <div class="fields vert">
+      <label class="grow">Enlace
+        <input id="url" type="text" spellcheck="false"
+               placeholder="https://www.youtube.com/playlist?list=…" />
+      </label>
+      <p class="hint">Vale un vídeo, una playlist o un canal de YouTube. yt-dlp soporta además
+        cientos de webs (Vimeo, SoundCloud, Twitch, Bandcamp…).</p>
+    </div>
+
+    <div class="fields">
+      <label>Bajar <select id="dKind">
+        <option value="audio">Solo audio</option>
+        <option value="video">Vídeo</option>
+      </select></label>
+      <label class="audio-only">Formato <select id="dFormat"></select></label>
+      <label class="audio-only">Calidad <select id="dBitrate"></select></label>
+      <label class="video-only hidden">Resolución <select id="dHeight"></select></label>
+    </div>
+
+    <div class="fields">
+      <label class="grow">Destino
+        <span class="path"><button id="dOut" class="pathbtn"></button></span>
+      </label>
+    </div>
+
+    <button id="dGo" class="go">Descargar</button>
+  </section>
+</main>
+
+<footer>
+  <div class="barwrap"><div id="bar"></div></div>
+  <div class="statusline">
+    <span id="status">Listo</span>
+    <button id="toggleLog" class="link">Ver detalle</button>
+  </div>
+  <pre id="log" class="hidden"></pre>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
