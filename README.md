@@ -12,14 +12,15 @@ YouTube**. Para Windows y macOS, sin instalación: descomprimes y haces doble cl
 
 ## Descargas
 
-En la pestaña [Releases](../../releases) hay cuatro archivos por versión:
+En la pestaña [Releases](../../releases) hay un archivo por sistema:
 
 | Archivo | Qué es |
 |---|---|
-| `…-windows-x64-portable.zip` | Descomprimir y abrir `Audix.exe`. Trae ffmpeg y yt-dlp dentro. |
-| `…-windows-x64-instalador.exe` | Instalador normal. Al primer arranque ofrece descargar ffmpeg y yt-dlp. |
-| `…-macos-universal-portable.zip` | Descomprimir y abrir `Audix.app`. Trae ffmpeg y yt-dlp dentro. Intel y Apple Silicon. |
-| `…-macos-universal-instalador.dmg` | DMG normal. Al primer arranque ofrece descargar ffmpeg y yt-dlp. |
+| `…-windows-x64-instalador.exe` | Instalador para Windows 10 y 11. |
+| `…-macos-universal.dmg` | DMG para macOS, Intel y Apple Silicon. |
+
+La primera vez que la abras te pedirá descargar las dos herramientas en las que se apoya
+(unos 120 MB, una sola vez). No van dentro del instalador a propósito: ver más abajo.
 
 La app no está firmada, así que la primera vez el sistema avisa:
 
@@ -38,16 +39,26 @@ El trabajo pesado lo hacen dos programas probados, que Audix llama por debajo:
 - [**ffmpeg**](https://ffmpeg.org) extrae y recodifica el audio.
 - [**yt-dlp**](https://github.com/yt-dlp/yt-dlp) descarga de YouTube y compañía.
 
-La versión portable los lleva en `bin/`, al lado del ejecutable. La instalable sale sin
-ellos y los descarga de sus repos oficiales a la carpeta de datos del usuario cuando
-pulsas *Descargar herramientas*. Si ya los tienes en el PATH, usa esos.
+Audix no los empaqueta: los descarga de sus repositorios oficiales la primera vez que la
+abres, y los guarda en su carpeta de datos. Si ya los tienes instalados en el sistema,
+usa esos y no descarga nada.
+
+**Por qué no van dentro del instalador.** Empaquetarlos daría una app más cómoda el primer
+día y rota a los pocos meses: la copia de yt-dlp quedaría congelada en la fecha de
+compilación y acabaría dando `403`. Al descargarlos, la copia siempre es la del día que
+instalas, y la que se actualiza es la que de verdad usa la app, sin que convivan dos
+versiones distintas ni se prometa un "portable" que en realidad escribe fuera de su
+carpeta.
 
 Mantener yt-dlp al día importa de verdad: YouTube cambia su extracción cada pocas semanas
-y las versiones antiguas empiezan a devolver `HTTP Error 403: Forbidden`. Por eso la
-cabecera de la ventana enseña siempre la versión instalada con un botón **Actualizar** al
-lado, que baja la última a la carpeta de la app (tiene prioridad sobre la del sistema).
-Cuando una descarga falla por ese motivo, la app lo detecta y te lo dice en vez de dejar
-el error en crudo.
+y las versiones antiguas empiezan a devolver `HTTP Error 403: Forbidden`. Audix lo trata
+como parte del producto, no como un detalle:
+
+- La cabecera enseña siempre la versión instalada, con un botón **Actualizar** al lado que
+  baja la última (tiene prioridad sobre la que haya en el sistema).
+- Si la versión pasa de unos dos meses y medio, avisa antes de que falle nada.
+- Si una descarga falla con un `403` u otro error conocido, lo traduce a qué hacer en vez
+  de dejar el mensaje en crudo.
 
 ## Desarrollo
 
@@ -59,7 +70,7 @@ nada que instalar.
 ```
 src/                interfaz (index.html, styles.css, app.js)
 src-tauri/src/      main.rs (comandos y ejecución) y tools.rs (ffmpeg y yt-dlp)
-scripts/            descarga de herramientas y versionado
+scripts/            comprobación de las descargas y versionado
 .github/workflows/  tests y compilación de las releases
 ```
 
@@ -82,8 +93,10 @@ Para ver la interfaz en un navegador sin compilar nada, sirve `src/` por HTTP co
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-GitHub Actions compila en runners de Windows y macOS, empaqueta los cuatro archivos y crea
-la release. La versión de la etiqueta se escribe sola en `tauri.conf.json` y `Cargo.toml`.
+GitHub Actions compila en runners de Windows y macOS y crea la release. Antes de compilar
+comprueba que las descargas de ffmpeg y yt-dlp siguen vivas y que esa build de ffmpeg trae
+los seis códecs, para no publicar una versión que no funcione en una máquina limpia. La
+versión de la etiqueta se escribe sola en `tauri.conf.json` y `Cargo.toml`.
 
 ## Lo que no hace
 

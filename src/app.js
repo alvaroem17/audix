@@ -68,34 +68,74 @@ async function refreshTools() {
 }
 
 function showTools(t) {
-  const box = $("tools");
-  box.classList.remove("hidden");
   const missing = [!t.ffmpeg.found && "ffmpeg", !t.ytdlp.found && "yt-dlp"].filter(Boolean);
 
-  if (missing.length) {
-    box.textContent = `Falta ${missing.join(" y ")} `;
-    addAction(box, "Descargar herramientas", "install_tools");
-    return;
-  }
+  // Sin herramientas no funciona nada, así que la pantalla de preparación
+  // sustituye a la app entera en vez de ser un avisito en la cabecera.
+  setupMode(missing, t.dir);
+  const box = $("tools");
+  box.classList.toggle("hidden", missing.length > 0);
+  if (missing.length) return;
+
   // La versión de yt-dlp siempre a la vista: es el dato que explica casi todos
   // los fallos de descarga, y el botón de actualizar tiene que estar a mano.
   box.textContent = `yt-dlp ${t.ytdlp.version || "?"} `;
   box.title = `${t.ytdlp.path}\nffmpeg ${t.ffmpeg.version} — ${t.ffmpeg.path}`;
   addAction(box, "Actualizar", "update_ytdlp");
+  avisarSiEsViejo(t.ytdlp.version);
+}
+
+function setupMode(missing, dir) {
+  const activo = missing.length > 0;
+  $("setup").classList.toggle("hidden", !activo);
+  document.querySelector(".tabs").classList.toggle("hidden", activo);
+  $("main").classList.toggle("hidden", activo);
+  $("go").classList.toggle("hidden", activo);
+  if (!activo) return;
+  $("setupTitle").textContent =
+    missing.length === 2 ? "Falta preparar las herramientas" : `Falta ${missing[0]}`;
+  $("setupWhere").textContent = `Se guardan en ${dir}. Solo hay que hacerlo una vez.`;
+  $("setupGo").onclick = () => run("install_tools");
+}
+
+// Las versiones de yt-dlp son fechas (2026.10.26). YouTube deja de servir a las
+// antiguas, así que más vale avisar antes de que falle una descarga.
+const DIAS_AVISO = 75;
+
+function edadEnDias(version) {
+  const m = /^(\d{4})\.(\d{2})\.(\d{2})/.exec(version || "");
+  if (!m) return null;
+  const fecha = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+  return Math.floor((Date.now() - fecha) / 86400000);
+}
+
+function avisarSiEsViejo(version) {
+  const dias = edadEnDias(version);
+  const viejo = dias !== null && dias >= DIAS_AVISO;
+  $("hint").classList.toggle("warn", viejo);
+  $("hint").classList.toggle("hidden", !viejo);
+  if (viejo) {
+    const meses = Math.floor(dias / 30);
+    $("hint").textContent =
+      `Tu yt-dlp tiene ${meses >= 2 ? meses + " meses" : dias + " días"}. ` +
+      "YouTube suele bloquear las versiones antiguas: conviene pulsar «Actualizar» arriba.";
+  }
+}
+
+async function run(cmd) {
+  try {
+    await invoke(cmd);
+    showLog(true);
+  } catch (e) {
+    alert(e);
+  }
 }
 
 function addAction(box, label, cmd) {
   const b = document.createElement("button");
   b.className = "link";
   b.textContent = label;
-  b.onclick = async () => {
-    try {
-      await invoke(cmd);
-      showLog(true);
-    } catch (e) {
-      alert(e);
-    }
-  };
+  b.onclick = () => run(cmd);
   box.appendChild(b);
 }
 
@@ -274,7 +314,9 @@ listen("busy", ({ payload }) => {
   refreshTools();
   $("openOut").classList.toggle("hidden", !lastOut);
   const msg = $("status").textContent.includes("error") ? pista($("log").textContent) : "";
-  $("hint").textContent = msg;
-  $("hint").classList.toggle("hidden", !msg);
-  if (msg) showLog(true);
+  if (msg) {
+    $("hint").textContent = msg;
+    $("hint").classList.remove("hidden", "warn");
+    showLog(true);
+  }
 });

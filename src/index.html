@@ -12,12 +12,28 @@
   <div id="tools" class="badge hidden"></div>
 </header>
 
+<section id="setup" class="hidden">
+  <div class="card">
+    <h2 id="setupTitle">Falta preparar las herramientas</h2>
+    <p>Audix no hace el trabajo pesado por su cuenta: se apoya en dos programas
+       libres y muy probados que hay que descargar una sola vez.</p>
+    <ul class="tools-list">
+      <li><b>ffmpeg</b> — extrae y convierte el audio. Unos 80 MB.
+        <span class="src">github.com/eugeneware/ffmpeg-static</span></li>
+      <li><b>yt-dlp</b> — descarga de YouTube y de otros cientos de webs. Unos 40 MB.
+        <span class="src">github.com/yt-dlp/yt-dlp</span></li>
+    </ul>
+    <p class="hint" id="setupWhere"></p>
+    <button id="setupGo" class="go">Descargar herramientas</button>
+  </div>
+</section>
+
 <nav class="tabs">
   <button data-tab="convert" class="active">Convertir</button>
   <button data-tab="download">Descargar</button>
 </nav>
 
-<main>
+<main id="main">
   <section id="tab-convert">
     <div id="drop" class="drop">
       <p class="drop-title">Arrastra vídeos o carpetas aquí</p>

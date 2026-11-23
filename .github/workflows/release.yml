@@ -50,11 +50,12 @@ jobs:
         working-directory: src-tauri
         run: cargo test --release
 
-      - name: Descargar ffmpeg y yt-dlp
+      # La app descarga ffmpeg y yt-dlp al primer arranque. Si esas URLs dejan de
+      # servir, la versión publicada no funcionaría para nadie: mejor fallar aquí.
+      - name: Comprobar las descargas de herramientas
         shell: bash
-        run: ./scripts/fetch-tools.sh ${{ matrix.platform }}
+        run: ./scripts/check-tools.sh ${{ matrix.platform }}
 
-      # Instalador: sin herramientas dentro, las ofrece al primer arranque.
       - name: Compilar instalador (Windows)
         if: matrix.platform == 'windows'
         run: tauri build --bundles nsis
@@ -63,35 +64,18 @@ jobs:
         if: matrix.platform == 'macos'
         run: tauri build --target universal-apple-darwin --bundles dmg
 
-      # Portable: reaprovecha lo ya compilado y mete ffmpeg y yt-dlp al lado.
-      - name: Empaquetar portable (Windows)
-        if: matrix.platform == 'windows'
+      - name: Recoger el instalador
         shell: bash
         run: |
-          mkdir -p pack/Audix dist
-          cp src-tauri/target/release/audix.exe pack/Audix/Audix.exe
-          cp -r src-tauri/bin pack/Audix/bin
-          cp PORTABLE.txt pack/Audix/LEEME.txt
-          (cd pack && 7z a -tzip "../dist/Audix-${{ github.ref_name }}-windows-x64-portable.zip" Audix)
-          cp src-tauri/target/release/bundle/nsis/*-setup.exe \
-             "dist/Audix-${{ github.ref_name }}-windows-x64-instalador.exe"
-
-      - name: Empaquetar portable (macOS)
-        if: matrix.platform == 'macos'
-        shell: bash
-        run: |
-          tauri build --target universal-apple-darwin --bundles app \
-            --config '{"bundle":{"resources":["bin/*"]}}'
-          APP=src-tauri/target/universal-apple-darwin/release/bundle/macos/Audix.app
-          # Sin esto el portable saldría sin ffmpeg y fallaría al convertir.
-          test -x "$APP/Contents/Resources/bin/ffmpeg"
-          test -x "$APP/Contents/Resources/bin/yt-dlp"
-          mkdir -p pack dist
-          cp -R "$APP" pack/
-          cp PORTABLE.txt pack/LEEME.txt
-          (cd pack && zip -qry "../dist/Audix-${{ github.ref_name }}-macos-universal-portable.zip" .)
-          cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg \
-             "dist/Audix-${{ github.ref_name }}-macos-universal-instalador.dmg"
+          mkdir -p dist
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            cp src-tauri/target/release/bundle/nsis/*-setup.exe \
+               "dist/Audix-${{ github.ref_name }}-windows-x64-instalador.exe"
+          else
+            cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg \
+               "dist/Audix-${{ github.ref_name }}-macos-universal.dmg"
+          fi
+          ls -lh dist
 
       - uses: actions/upload-artifact@v4
         with:

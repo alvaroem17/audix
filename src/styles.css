@@ -287,6 +287,18 @@ pre {
   user-select: text;
 }
 
+#setup { padding: 16px 20px; }
+#setup .card { padding: 20px; }
+#setup h2 { font-size: 15px; text-transform: none; letter-spacing: 0; color: var(--fg); margin-bottom: 10px; }
+#setup p { margin: 0 0 12px; }
+#setup .go { margin-bottom: 0; }
+
+.tools-list { margin: 0 0 12px; padding-left: 18px; }
+.tools-list li { margin-bottom: 6px; }
+.tools-list .src { display: block; color: var(--muted); font-size: 11.5px; font-family: ui-monospace, monospace; }
+
+.hint-box.warn { border-color: var(--muted); background: var(--soft); }
+
 .hint-box {
   margin: 10px 0 0;
   padding: 9px 12px;

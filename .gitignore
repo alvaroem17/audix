@@ -1,4 +1,5 @@
 /src-tauri/target/
+# (ya no se empaquetan herramientas; esta carpeta es solo de pruebas locales)
 /src-tauri/bin/
 /dist/
 node_modules/

@@ -1,8 +1,9 @@
 //! Localización y descarga de las herramientas externas (ffmpeg y yt-dlp).
 //!
-//! La app no las lleva compiladas dentro: en la versión portable viajan en `bin/`
-//! junto al ejecutable, y en la instalada se descargan de sus repos oficiales a la
-//! carpeta de datos del usuario. Si el sistema ya las tiene, se usan esas.
+//! No viajan dentro de la app: se descargan de sus repos oficiales a la carpeta de
+//! datos del usuario la primera vez que se abre. Si el sistema ya las tiene, se usan
+//! esas. Empaquetarlas congelaría la copia de yt-dlp en la fecha de compilación, y
+//! YouTube deja de servir a las versiones viejas a los pocos meses.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -26,25 +27,13 @@ pub fn bin_dir(app: &AppHandle) -> PathBuf {
         .join("bin")
 }
 
-/// Busca una herramienta por orden: descargada por la app, junto al ejecutable
-/// (versión portable), dentro del paquete .app de macOS, y por último el PATH.
+/// Busca una herramienta: primero la que ha descargado la app, que es la que
+/// mantiene al día, y si no hay, la del PATH del sistema.
+///
+/// Quien no pueda descargar (un cortafuegos de empresa) puede dejar el binario a
+/// mano en la carpeta que la ventana enseña al arrancar, que es `bin_dir`.
 pub fn find(app: &AppHandle, name: &str) -> Option<PathBuf> {
-    find_in(&search_dirs(app), name)
-}
-
-/// Dónde se mira, en orden: lo que ha descargado la app, `bin/` junto al
-/// ejecutable (portable de Windows), el propio directorio del ejecutable y
-/// `Resources/bin` dentro del paquete .app de macOS.
-fn search_dirs(app: &AppHandle) -> Vec<PathBuf> {
-    let mut dirs = vec![bin_dir(app)];
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(d) = exe.parent() {
-            dirs.push(d.join("bin"));
-            dirs.push(d.to_path_buf());
-            dirs.push(d.join("../Resources/bin"));
-        }
-    }
-    dirs
+    find_in(&[bin_dir(app)], name)
 }
 
 fn find_in(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
@@ -223,11 +212,10 @@ fn set_executable(_p: &Path) {}
 mod tests {
     use super::*;
 
-    /// La versión portable depende de que se encuentre `bin/` junto al ejecutable
-    /// (y `Resources/bin` dentro del .app de macOS). Si esto se rompe, la app se
-    /// instala bien pero no convierte nada.
+    /// La carpeta propia de la app tiene que ganarle al PATH: es donde cae la
+    /// versión nueva al pulsar «Actualizar», y si no gana el botón no sirve de nada.
     #[test]
-    fn encuentra_la_herramienta_junto_al_ejecutable() {
+    fn la_carpeta_de_la_app_manda_sobre_el_path() {
         let base = std::env::temp_dir().join("audix-test-find");
         let _ = std::fs::remove_dir_all(&base);
         let bin = base.join("bin");
@@ -235,11 +223,22 @@ mod tests {
         let file = format!("ffmpeg{EXE}");
         std::fs::write(bin.join(&file), b"falso").unwrap();
 
-        let dirs = vec![base.join("no-existe"), bin.clone()];
-        assert_eq!(find_in(&dirs, "ffmpeg"), Some(bin.join(&file)));
-        // Gana el primero de la lista: lo descargado por la app manda sobre el PATH.
-        assert_eq!(find_in(&dirs, "ffmpeg").unwrap().parent().unwrap(), bin);
-        assert!(find_in(&dirs, "programa-que-no-existe-xyz").is_none());
+        // Aunque el sistema tenga ffmpeg en el PATH, gana el de la carpeta de la app.
+        assert!(
+            which(&file).is_some(),
+            "este equipo debería tener ffmpeg en el PATH"
+        );
+        assert_eq!(
+            find_in(std::slice::from_ref(&bin), "ffmpeg"),
+            Some(bin.join(&file))
+        );
+        // Y si no está en ninguna de las carpetas propias, se cae al PATH.
+        assert_eq!(
+            find_in(&[base.join("no-existe")], "ffmpeg"),
+            which(&file),
+            "sin copia propia debe usar la del sistema"
+        );
+        assert!(find_in(std::slice::from_ref(&bin), "programa-que-no-existe-xyz").is_none());
         let _ = std::fs::remove_dir_all(&base);
     }
 
